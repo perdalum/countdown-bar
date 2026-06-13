@@ -47,3 +47,7 @@ open .build/CountdownBar.app
 Exactly one countdown is kept selected for the menu bar. If none is selected, CountdownBar selects the first countdown automatically.
 
 Set `includeTime` to `false` for date-only countdowns that show whole days (`today`, `1d`, `2 days ago`, etc.). Older config files without `includeTime` default to `true`.
+
+## License
+
+CountdownBar is released under the MIT License. See [LICENSE](LICENSE).
