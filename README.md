@@ -50,6 +50,10 @@ Exactly one countdown is kept selected for the menu bar. If none is selected, Co
 
 Set `includeTime` to `false` for date-only countdowns that show whole days (`today`, `1d`, `2 days ago`, etc.). Older config files without `includeTime` default to `true`.
 
+## Future Work
+
+- hunt down and correct a calculation a calculation error of one hour. Time is now 2026-06-15T11:32 and the program calculates that New Year is in 199 days, 13 hours, and 26 minutes, where that is actually circa one hour after midnight.
+
 ## License
 
 CountdownBar is released under the MIT License. See [LICENSE](LICENSE).
