@@ -52,7 +52,7 @@ Set `includeTime` to `false` for date-only countdowns that show whole days (`tod
 
 ## Future Work
 
-- hunt down and correct a calculation a calculation error of one hour. Time is now 2026-06-15T11:32 and the program calculates that New Year is in 199 days, 13 hours, and 26 minutes, where that is actually circa one hour after midnight.
+- hunt down and correct a calculation error. Time is now 2026-06-15T11:32 and the program calculates that New Year is in 199 days, 13 hours, and 26 minutes, where that is actually circa one hour after midnight.
 
 ## License
 
