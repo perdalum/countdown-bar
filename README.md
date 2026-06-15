@@ -15,6 +15,8 @@ A tiny native macOS menu bar app for tracking multiple countdowns. One countdown
   ~/Library/Application Support/CountdownBar/countdowns.json
   ```
 
+![Example with two count downs](screenshot.png)
+
 ## Develop
 
 Run directly from Swift Package Manager:
