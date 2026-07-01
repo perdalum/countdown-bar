@@ -1,26 +1,80 @@
 import AppKit
 import Foundation
 
+enum DisplayMode: String, Codable, CaseIterable {
+    case exactTime
+    case wholeDays
+    case percentRemaining
+
+    var title: String {
+        switch self {
+        case .exactTime:
+            return "Exact time remaining"
+        case .wholeDays:
+            return "Whole days remaining"
+        case .percentRemaining:
+            return "Percent remaining"
+        }
+    }
+
+    var showsTimePicker: Bool {
+        self == .exactTime
+    }
+
+    var popupIndex: Int {
+        switch self {
+        case .exactTime:
+            return 0
+        case .wholeDays:
+            return 1
+        case .percentRemaining:
+            return 2
+        }
+    }
+
+    init(popupIndex: Int) {
+        switch popupIndex {
+        case 1:
+            self = .wholeDays
+        case 2:
+            self = .percentRemaining
+        default:
+            self = .exactTime
+        }
+    }
+}
+
 struct Countdown: Codable, Identifiable, Equatable {
     var id: UUID
     var title: String
+    var startDate: Date
     var date: Date
     var showInMenuBar: Bool
-    var includeTime: Bool
+    var displayMode: DisplayMode
 
-    init(id: UUID = UUID(), title: String, date: Date, showInMenuBar: Bool = false, includeTime: Bool = true) {
+    init(
+        id: UUID = UUID(),
+        title: String,
+        startDate: Date = Date(),
+        date: Date,
+        showInMenuBar: Bool = false,
+        displayMode: DisplayMode = .exactTime
+    ) {
         self.id = id
         self.title = title
+        self.startDate = startDate
         self.date = date
         self.showInMenuBar = showInMenuBar
-        self.includeTime = includeTime
+        self.displayMode = displayMode
     }
 
     private enum CodingKeys: String, CodingKey {
         case id
         case title
+        case startDate
         case date
         case showInMenuBar
+        case displayMode
         case includeTime
     }
 
@@ -30,7 +84,30 @@ struct Countdown: Codable, Identifiable, Equatable {
         title = try container.decode(String.self, forKey: .title)
         date = try container.decode(Date.self, forKey: .date)
         showInMenuBar = try container.decode(Bool.self, forKey: .showInMenuBar)
-        includeTime = try container.decodeIfPresent(Bool.self, forKey: .includeTime) ?? true
+
+        if let savedDisplayMode = try container.decodeIfPresent(DisplayMode.self, forKey: .displayMode) {
+            displayMode = savedDisplayMode
+        } else {
+            let includeTime = try container.decodeIfPresent(Bool.self, forKey: .includeTime) ?? true
+            displayMode = includeTime ? .exactTime : .wholeDays
+        }
+
+        startDate = try container.decodeIfPresent(Date.self, forKey: .startDate)
+            ?? Countdown.defaultStartDate(for: displayMode)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(title, forKey: .title)
+        try container.encode(startDate, forKey: .startDate)
+        try container.encode(date, forKey: .date)
+        try container.encode(showInMenuBar, forKey: .showInMenuBar)
+        try container.encode(displayMode, forKey: .displayMode)
+    }
+
+    private static func defaultStartDate(for displayMode: DisplayMode) -> Date {
+        displayMode.showsTimePicker ? Date() : CountdownFormatter.normalizedToNoon(Date())
     }
 }
 
@@ -153,16 +230,26 @@ final class CountdownStore {
 final class CountdownFormatter {
     static func menuBarTitle(for countdown: Countdown?, now: Date = Date()) -> String {
         guard let countdown else { return "No countdowns" }
-        let remaining = countdown.includeTime
-            ? compactRemaining(until: countdown.date, now: now)
-            : compactDaysRemaining(until: countdown.date, now: now)
+        let remaining = switch countdown.displayMode {
+        case .exactTime:
+            compactRemaining(until: countdown.date, now: now)
+        case .wholeDays:
+            compactDaysRemaining(until: countdown.date, now: now)
+        case .percentRemaining:
+            compactPercentRemaining(from: countdown.startDate, until: countdown.date, now: now)
+        }
         return "\(countdown.title): \(remaining)"
     }
 
     static func menuLine(for countdown: Countdown, now: Date = Date()) -> String {
-        let remaining = countdown.includeTime
-            ? fullRemaining(until: countdown.date, now: now)
-            : fullDaysRemaining(until: countdown.date, now: now)
+        let remaining = switch countdown.displayMode {
+        case .exactTime:
+            fullRemaining(until: countdown.date, now: now)
+        case .wholeDays:
+            fullDaysRemaining(until: countdown.date, now: now)
+        case .percentRemaining:
+            fullPercentRemaining(from: countdown.startDate, until: countdown.date, now: now)
+        }
         return "\(countdown.title): \(remaining)"
     }
 
@@ -219,18 +306,47 @@ final class CountdownFormatter {
         return days < 0 ? "\(dayText) ago" : dayText
     }
 
+    static func compactPercentRemaining(from startDate: Date, until endDate: Date, now: Date = Date()) -> String {
+        "\(percentRemaining(from: startDate, until: endDate, now: now, normalizeToNoon: true))%"
+    }
+
+    static func fullPercentRemaining(from startDate: Date, until endDate: Date, now: Date = Date()) -> String {
+        "\(percentRemaining(from: startDate, until: endDate, now: now, normalizeToNoon: true))% remaining"
+    }
+
+    static func normalizedToNoon(_ date: Date, calendar: Calendar = .current) -> Date {
+        var components = calendar.dateComponents([.year, .month, .day], from: date)
+        components.hour = 12
+        components.minute = 0
+        components.second = 0
+        return calendar.date(from: components) ?? date
+    }
+
     private static func dayDifference(until date: Date, now: Date = Date()) -> Int {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: now)
         let targetDay = calendar.startOfDay(for: date)
         return calendar.dateComponents([.day], from: today, to: targetDay).day ?? 0
     }
+
+    private static func percentRemaining(from startDate: Date, until endDate: Date, now: Date = Date(), normalizeToNoon: Bool) -> Int {
+        let start = normalizeToNoon ? normalizedToNoon(startDate) : startDate
+        let end = normalizeToNoon ? normalizedToNoon(endDate) : endDate
+        let current = normalizeToNoon ? normalizedToNoon(now) : now
+        let totalDuration = end.timeIntervalSince(start)
+
+        guard totalDuration != 0 else { return 100 }
+
+        let rawPercentage = 100.0 * end.timeIntervalSince(current) / totalDuration
+        let clampedPercentage = max(0, min(100, rawPercentage))
+        return Int(clampedPercentage.rounded())
+    }
 }
 
 @MainActor
 final class ModalButtonHandler: NSObject {
+    weak var startDatePicker: NSDatePicker?
     weak var datePicker: NSDatePicker?
-    weak var includeTimeButton: NSButton?
 
     @objc func accept(_ sender: Any?) {
         NSApp.stopModal(withCode: .OK)
@@ -240,12 +356,14 @@ final class ModalButtonHandler: NSObject {
         NSApp.stopModal(withCode: .cancel)
     }
 
-    @objc func toggleIncludeTime(_ sender: NSButton) {
-        updateDatePickerElements(includeTime: sender.state == .on)
+    @objc func changeDisplayMode(_ sender: NSPopUpButton) {
+        updateDatePickers(for: DisplayMode(popupIndex: sender.indexOfSelectedItem))
     }
 
-    func updateDatePickerElements(includeTime: Bool) {
-        datePicker?.datePickerElements = includeTime ? [.yearMonthDay, .hourMinute] : [.yearMonthDay]
+    func updateDatePickers(for displayMode: DisplayMode) {
+        let elements: NSDatePicker.ElementFlags = displayMode.showsTimePicker ? [.yearMonthDay, .hourMinute] : [.yearMonthDay]
+        startDatePicker?.datePickerElements = elements
+        datePicker?.datePickerElements = elements
     }
 }
 
@@ -400,7 +518,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func presentCountdownDialog(existing: Countdown?) {
         let handler = ModalButtonHandler()
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 470),
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 760),
             styleMask: [.titled],
             backing: .buffered,
             defer: false
@@ -425,20 +543,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         titleField.placeholderString = "Vacation, Launch day, Birthday…"
         titleField.translatesAutoresizingMaskIntoConstraints = false
 
+        let displayLabel = NSTextField(labelWithString: "Display")
+        displayLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        let displayMode = existing?.displayMode ?? .exactTime
+        let displayModePopup = NSPopUpButton()
+        for mode in DisplayMode.allCases {
+            displayModePopup.addItem(withTitle: mode.title)
+        }
+        displayModePopup.selectItem(at: displayMode.popupIndex)
+        displayModePopup.target = handler
+        displayModePopup.action = #selector(ModalButtonHandler.changeDisplayMode(_:))
+        displayModePopup.translatesAutoresizingMaskIntoConstraints = false
+
+        let defaultStartDate = existing?.startDate ?? (displayMode.showsTimePicker ? Date() : CountdownFormatter.normalizedToNoon(Date()))
+
+        let startDateLabel = NSTextField(labelWithString: "Start date")
+        startDateLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        let startDatePicker = NSDatePicker()
+        startDatePicker.datePickerStyle = .clockAndCalendar
+        startDatePicker.dateValue = defaultStartDate
+        startDatePicker.translatesAutoresizingMaskIntoConstraints = false
+
         let dateLabel = NSTextField(labelWithString: "Target date")
         dateLabel.translatesAutoresizingMaskIntoConstraints = false
-
-        let includeTimeButton = NSButton(checkboxWithTitle: "Include time", target: handler, action: #selector(ModalButtonHandler.toggleIncludeTime(_:)))
-        includeTimeButton.state = (existing?.includeTime ?? true) ? .on : .off
-        includeTimeButton.translatesAutoresizingMaskIntoConstraints = false
 
         let datePicker = NSDatePicker()
         datePicker.datePickerStyle = .clockAndCalendar
         datePicker.dateValue = existing?.date ?? Date().addingTimeInterval(24 * 60 * 60)
         datePicker.translatesAutoresizingMaskIntoConstraints = false
+        handler.startDatePicker = startDatePicker
         handler.datePicker = datePicker
-        handler.includeTimeButton = includeTimeButton
-        handler.updateDatePickerElements(includeTime: includeTimeButton.state == .on)
+        handler.updateDatePickers(for: displayMode)
+
+        let helpLabel = NSTextField(labelWithString: "Percent remaining uses the configured start and target dates. Date-only modes normalize both dates to noon.")
+        helpLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        helpLabel.textColor = .secondaryLabelColor
+        helpLabel.lineBreakMode = .byWordWrapping
+        helpLabel.maximumNumberOfLines = 0
+        helpLabel.translatesAutoresizingMaskIntoConstraints = false
 
         let cancelButton = NSButton(title: "Cancel", target: handler, action: #selector(ModalButtonHandler.cancel(_:)))
         cancelButton.translatesAutoresizingMaskIntoConstraints = false
@@ -451,9 +595,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         contentView.addSubview(headingLabel)
         contentView.addSubview(titleLabel)
         contentView.addSubview(titleField)
+        contentView.addSubview(displayLabel)
+        contentView.addSubview(displayModePopup)
+        contentView.addSubview(startDateLabel)
+        contentView.addSubview(startDatePicker)
         contentView.addSubview(dateLabel)
-        contentView.addSubview(includeTimeButton)
         contentView.addSubview(datePicker)
+        contentView.addSubview(helpLabel)
         contentView.addSubview(cancelButton)
         contentView.addSubview(saveButton)
 
@@ -470,18 +618,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             titleField.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 24),
             titleField.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -24),
 
-            dateLabel.topAnchor.constraint(equalTo: titleField.bottomAnchor, constant: 18),
+            displayLabel.topAnchor.constraint(equalTo: titleField.bottomAnchor, constant: 18),
+            displayLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 24),
+            displayLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -24),
+
+            displayModePopup.topAnchor.constraint(equalTo: displayLabel.bottomAnchor, constant: 6),
+            displayModePopup.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 24),
+            displayModePopup.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -24),
+
+            startDateLabel.topAnchor.constraint(equalTo: displayModePopup.bottomAnchor, constant: 18),
+            startDateLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 24),
+            startDateLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -24),
+
+            startDatePicker.topAnchor.constraint(equalTo: startDateLabel.bottomAnchor, constant: 8),
+            startDatePicker.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 24),
+            startDatePicker.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -24),
+            startDatePicker.heightAnchor.constraint(greaterThanOrEqualToConstant: 230),
+
+            dateLabel.topAnchor.constraint(equalTo: startDatePicker.bottomAnchor, constant: 18),
             dateLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 24),
             dateLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -24),
 
-            includeTimeButton.topAnchor.constraint(equalTo: dateLabel.bottomAnchor, constant: 8),
-            includeTimeButton.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 24),
-            includeTimeButton.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -24),
-
-            datePicker.topAnchor.constraint(equalTo: includeTimeButton.bottomAnchor, constant: 8),
+            datePicker.topAnchor.constraint(equalTo: dateLabel.bottomAnchor, constant: 8),
             datePicker.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 24),
             datePicker.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -24),
             datePicker.heightAnchor.constraint(greaterThanOrEqualToConstant: 230),
+
+            helpLabel.topAnchor.constraint(equalTo: datePicker.bottomAnchor, constant: 14),
+            helpLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 24),
+            helpLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -24),
 
             saveButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -24),
             saveButton.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -20),
@@ -501,12 +666,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let title = titleField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return }
 
-        let includeTime = includeTimeButton.state == .on
-        let selectedDate = includeTime ? datePicker.dateValue : Calendar.current.startOfDay(for: datePicker.dateValue)
-        var countdown = existing ?? Countdown(title: title, date: selectedDate, showInMenuBar: store.countdowns.isEmpty, includeTime: includeTime)
+        let selectedDisplayMode = DisplayMode(popupIndex: displayModePopup.indexOfSelectedItem)
+        let selectedStartDate = selectedDisplayMode.showsTimePicker
+            ? startDatePicker.dateValue
+            : CountdownFormatter.normalizedToNoon(startDatePicker.dateValue)
+        let selectedDate = selectedDisplayMode.showsTimePicker
+            ? datePicker.dateValue
+            : CountdownFormatter.normalizedToNoon(datePicker.dateValue)
+
+        guard selectedStartDate <= selectedDate else {
+            let alert = NSAlert()
+            alert.messageText = "Start date must be before target date"
+            alert.informativeText = "Choose a start date and time that is earlier than or equal to the target date and time."
+            alert.addButton(withTitle: "OK")
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
+            return
+        }
+
+        var countdown = existing ?? Countdown(
+            title: title,
+            startDate: selectedStartDate,
+            date: selectedDate,
+            showInMenuBar: store.countdowns.isEmpty,
+            displayMode: selectedDisplayMode
+        )
         countdown.title = title
+        countdown.startDate = selectedStartDate
         countdown.date = selectedDate
-        countdown.includeTime = includeTime
+        countdown.displayMode = selectedDisplayMode
         store.upsert(countdown)
         updateStatusTitle()
     }

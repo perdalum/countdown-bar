@@ -8,7 +8,8 @@ A tiny native macOS menu bar app for tracking multiple countdowns. One countdown
 - Lists all countdowns in the dropdown menu.
 - Add, edit, delete, and copy countdowns.
 - Choose which countdown appears in the menu bar.
-- Per countdown, choose whether to include the exact time or count whole days only.
+- Per countdown, choose one of three display modes: exact time remaining, whole days remaining, or percent remaining.
+- Percent remaining uses configurable start and target dates.
 - Stores countdowns as JSON at:
 
   ```text
@@ -39,16 +40,21 @@ open .build/CountdownBar.app
   {
     "id": "2B1F1C35-5C61-4D1E-BD5C-1D7961270B52",
     "title": "Launch day",
-    "date": "2026-09-01T09:00:00Z",
+    "startDate": "2026-06-15T12:00:00Z",
+    "date": "2026-09-01T12:00:00Z",
     "showInMenuBar": true,
-    "includeTime": true
+    "displayMode": "percentRemaining"
   }
 ]
 ```
 
 Exactly one countdown is kept selected for the menu bar. If none is selected, CountdownBar selects the first countdown automatically.
 
-Set `includeTime` to `false` for date-only countdowns that show whole days (`today`, `1d`, `2 days ago`, etc.). Older config files without `includeTime` default to `true`.
+`displayMode` can be `exactTime`, `wholeDays`, or `percentRemaining`.
+
+`startDate` can be configured when creating or editing a countdown. Percent remaining is calculated as `100 * (end - now) / (end - start)`, clamped to `0...100`, and shown as a whole percentage.
+
+For date-only modes, both `startDate` and `date` are normalized to noon, and the app requires the start date to be earlier than or equal to the target date. Older config files using `includeTime` still load and are migrated automatically.
 
 ## Future Work
 
