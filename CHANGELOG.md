@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Third countdown display mode for percent remaining in the menu bar and dropdown.
+- Configurable `startDate` for countdowns so percent remaining uses a user-defined interval.
+
+### Changed
+
+- Replaced the old `includeTime` toggle with a three-mode display selector.
+- Added start-date editing to the add/edit countdown dialog.
+- Added validation so the start date cannot be after the target date.
+- Date-only modes now normalize stored dates to noon.
+- Existing JSON configs using `includeTime` are migrated on load.
+
 ## [1.0.1] - 2026-06-13
 
 ### Added
